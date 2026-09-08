@@ -1,0 +1,5 @@
+# Colab: the notebook installs the package itself with `pip install -e`,
+# which pulls these in. Listed here for anyone running outside Colab.
+anthropic>=0.40
+pandas>=2.0
+matplotlib>=3.7
