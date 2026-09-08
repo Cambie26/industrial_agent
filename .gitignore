@@ -216,3 +216,43 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+
+
+
+
+
+# --- Project ---
+
+# Data
+data/
+*.csv
+*.parquet
+*.jsonl
+!tests/fixtures/*.csv
+
+# Model artefacts
+checkpoints/
+*.pt
+*.pth
+*.onnx
+*.pkl
+*.joblib
+
+# Agent runtime
+logs/
+runs/
+traces/
+.cache/
+*.db
+*.sqlite3
+
+# Secrets
+.env.*
+*.pem
+secrets.toml
+
+# Tooling
+.claude/settings.local.json
+.DS_Store
