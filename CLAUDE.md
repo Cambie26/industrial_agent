@@ -28,8 +28,11 @@
 ## Code style
 - Names are spelled out. No single-letter or cryptic variables —
   `df_failures` not `d`, `sensor_column` not `sc`. Loop variables included;
-  `for engine_id in ...` not `for e in ...`. The only exceptions are `i`
-  in a trivial index loop and the conventional `_` for a discard.
+  `for engine_id in ...` not `for e in ...`. The only exception is `i` in a
+  trivial index loop.
+- Don't prefix function names with `_`. If something is internal, say so in
+  its docstring. `_` on its own is fine when unpacking a value that genuinely
+  isn't used.
 - Comments describe *what* the code is doing, in plain blunt terms —
   "loop through each engine and take the last cycle", "drop the sensors
   that never move". A couple per longer function is right; a short obvious
@@ -39,6 +42,11 @@
   ordinary code.
 - Every module opens with a docstring saying what it's for and what the
   reader should know before touching it.
+- Function docstrings are one or two lines by default — what it does, and
+  anything surprising about what it returns. No sections, no ceremony.
+- A function that's long or takes more than two arguments gets the full
+  form instead: the one-line summary, then a list of arguments with their
+  types and a list of what comes back.
 - Type hints on public functions. British spelling, metric units.
 - Constants (URLs, column lists, thresholds) go at the top of the module in
   CAPS, not buried as magic numbers inside functions.
