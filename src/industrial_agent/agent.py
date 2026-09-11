@@ -50,13 +50,14 @@ def resolve_api_key() -> str | None:
     try:  # pragma: no cover - Colab only
         from google.colab import userdata
 
-        for name in ("ANTHROPIC_API_KEY", "api-key-sep26"):
+        # Try each secret name in turn; a missing secret raises, so skip it.
+        for secret_name in ("ANTHROPIC_API_KEY", "api-key-sep26"):
             try:
-                key = userdata.get(name)
+                api_key = userdata.get(secret_name)
             except Exception:
                 continue
-            if key:
-                return key
+            if api_key:
+                return api_key
     except ImportError:
         pass
     return os.environ.get("ANTHROPIC_API_KEY")
@@ -66,17 +67,26 @@ def build_client() -> Any:
     """An Anthropic client, with the API key resolved for Colab or local use."""
     import anthropic
 
-    key = resolve_api_key()
-    if not key:
+    api_key = resolve_api_key()
+    if not api_key:
         raise RuntimeError(
             "No API key found. In Colab, add a secret named ANTHROPIC_API_KEY "
             "and grant this notebook access. Locally, export ANTHROPIC_API_KEY."
         )
-    return anthropic.Anthropic(api_key=key)
+    return anthropic.Anthropic(api_key=api_key)
 
 
 class Agent:
-    """A maintenance analyst backed by the fleet tools."""
+    """A maintenance analyst backed by the fleet tools.
+
+    Args:
+        tools: FleetTools - the fleet the agent can query.
+        client: Any | None - an Anthropic client, or None to build one.
+        model: str - model ID to call.
+        system: str - system prompt.
+        max_turns: int - how many model turns before giving up on an answer.
+        max_tokens: int - output token cap per turn.
+    """
 
     def __init__(
         self,
@@ -100,10 +110,20 @@ class Agent:
         self.messages = []
 
     def run(self, question: str) -> Iterator[Event]:
-        """One question to a final answer, yielding each step as it happens."""
+        """One question to a final answer, yielding each step as it happens.
+
+        Args:
+            question: str - what to ask. Appended to the running conversation,
+                so earlier turns still apply until `reset()`.
+
+        Yields:
+            Event - the question, then each tool call and result, then either
+            an answer or an error if the turn ran out of turns.
+        """
         yield Event("question", question)
         self.messages.append({"role": "user", "content": question})
 
+        # Each pass is one model turn: it either answers or calls tools.
         for _ in range(self.max_turns):
             response = self.client.messages.create(
                 model=self.model,
@@ -120,27 +140,40 @@ class Agent:
             if response.stop_reason == "pause_turn":
                 continue
 
+            # Anything other than a tool call means the model is done.
             if response.stop_reason != "tool_use":
                 yield Event(
                     "answer",
-                    "".join(b.text for b in response.content
-                            if b.type == "text"),
+                    "".join(block.text for block in response.content
+                            if block.type == "text"),
                 )
                 return
 
-            yield from self._run_tools(response)
+            yield from self.run_tools(response)
 
         yield Event(
             "error",
             f"Stopped after {self.max_turns} turns without a final answer.",
         )
 
-    def _run_tools(self, response: Any) -> Iterator[Event]:
+    def run_tools(self, response: Any) -> Iterator[Event]:
         """Execute every tool call in one assistant turn, then post the
-        results back as a single user message."""
+        results back as a single user message.
+
+        Internal to the loop in `run()`; kept separate because the fan-out over
+        parallel tool calls is the part worth reading on its own.
+
+        Args:
+            response: Any - the assistant message, which may carry several
+                tool_use blocks.
+
+        Yields:
+            Event - a tool_call then a tool_result for each block executed.
+        """
         registry = self.tools.registry
         results: list[dict[str, Any]] = []
 
+        # One assistant turn can request several tools; run them all.
         for block in response.content:
             if block.type != "tool_use":
                 continue
@@ -149,7 +182,7 @@ class Agent:
             args = dict(block.input)
             yield Event(
                 "tool_call",
-                f"{block.name}({_format_args(args)})",
+                f"{block.name}({format_args(args)})",
                 {"name": block.name, "input": args},
             )
 
@@ -177,5 +210,8 @@ class Agent:
         self.messages.append({"role": "user", "content": results})
 
 
-def _format_args(args: dict[str, Any]) -> str:
-    return ", ".join(f"{k}={json.dumps(v)}" for k, v in args.items())
+def format_args(args: dict[str, Any]) -> str:
+    """Render tool arguments as a readable `name=value` call signature."""
+    return ", ".join(
+        f"{name}={json.dumps(value)}" for name, value in args.items()
+    )

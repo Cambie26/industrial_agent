@@ -13,7 +13,7 @@ from industrial_agent.health import (
 
 def test_baseline_covers_every_live_sensor(baseline):
     assert baseline.sensors == LIVE_SENSORS
-    assert set(baseline.mu.index) == set(LIVE_SENSORS)
+    assert set(baseline.healthy_mean.index) == set(LIVE_SENSORS)
     assert baseline.failure_score > 0
 
 
@@ -21,7 +21,7 @@ def test_baseline_excludes_dead_sensors(baseline):
     """Dead sensors have sd = 0 and would produce infinite z-scores."""
     assert "sensor_1" not in baseline.sensors
     assert "sensor_6" not in baseline.sensors
-    assert (baseline.sd > 0).all()
+    assert (baseline.healthy_sd > 0).all()
 
 
 def test_wear_rises_towards_failure(failed, baseline):

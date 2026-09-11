@@ -17,6 +17,7 @@ from .health import build_baseline
 from .tools import FleetTools
 
 RULE = "-" * 72
+TRANSCRIPT_TITLE = "# Industrial agent - demo transcript"
 
 
 class Chat:
@@ -30,7 +31,7 @@ class Chat:
     def ask(self, question: str) -> None:
         """Run one question and print the exchange."""
         for event in self.agent.run(question):
-            for line in self._render(event):
+            for line in self.render(event):
                 print(line)
                 self.transcript.append(line)
         print()
@@ -48,7 +49,7 @@ class Chat:
         path = Path(path)
         body = "\n".join(self.transcript).rstrip()
         path.write_text(
-            "# Industrial agent - demo transcript\n\n"
+            f"{TRANSCRIPT_TITLE}\n\n"
             f"Model: `{self.agent.model}`\n\n"
             f"```\n{body}\n```\n",
             encoding="utf-8",
@@ -56,7 +57,8 @@ class Chat:
         print(f"Wrote {path} ({len(self.transcript)} lines)")
         return path
 
-    def _render(self, event: Event) -> list[str]:
+    def render(self, event: Event) -> list[str]:
+        """Format one event as printable lines. Empty when it is suppressed."""
         if event.kind == "question":
             return [RULE, f"Q: {event.text}", RULE]
         if event.kind == "tool_call":
@@ -73,7 +75,16 @@ class Chat:
 
 
 def default_chat(show_tool_output: bool = True, **agent_kwargs) -> Chat:
-    """Download the data, calibrate, wire up the agent. One call to start."""
+    """Download the data, calibrate, wire up the agent. One call to start.
+
+    Args:
+        show_tool_output: bool - print each tool result, not just the call.
+        **agent_kwargs: Any - passed straight to `Agent` (client, model,
+            system, max_turns, max_tokens).
+
+    Returns:
+        Chat - ready to take questions.
+    """
     download()
     tools = FleetTools(load_fleet(), build_baseline(load_failed()))
     return Chat(Agent(tools, **agent_kwargs), show_tool_output=show_tool_output)

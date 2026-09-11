@@ -24,7 +24,7 @@ BASE_URL = (
 )
 FILES = ("train_FD001.txt", "test_FD001.txt", "RUL_FD001.txt")
 
-COLS: list[str] = (
+COLUMNS: list[str] = (
     ["unit", "cycle", "setting_1", "setting_2", "setting_3"]
     + [f"sensor_{i}" for i in range(1, 22)]
 )
@@ -47,6 +47,8 @@ def download(dest: Path | None = None) -> Path:
     """Fetch the FD001 files if they are not already on disk. Idempotent."""
     dest = Path(dest) if dest is not None else data_dir()
     dest.mkdir(parents=True, exist_ok=True)
+
+    # Fetch each file only when it is missing, so re-running costs nothing.
     for name in FILES:
         target = dest / name
         if not target.exists():
@@ -56,21 +58,26 @@ def download(dest: Path | None = None) -> Path:
 
 def read_cmapss(path: str | Path) -> pd.DataFrame:
     """Read one whitespace-delimited C-MAPSS file into a labelled frame."""
-    return pd.read_csv(path, sep=r"\s+", header=None, names=COLS)
+    return pd.read_csv(path, sep=r"\s+", header=None, names=COLUMNS)
 
 
 @lru_cache(maxsize=8)
-def _load_cached(path_str: str) -> pd.DataFrame:
+def read_cmapss_cached(path_str: str) -> pd.DataFrame:
+    """Cached `read_cmapss`, keyed on the path as a string so it stays hashable.
+
+    Internal: callers should use `load_failed` or `load_fleet`. Returns the
+    same frame object on every call, so treat the result as read-only.
+    """
     return read_cmapss(path_str)
 
 
 def load_failed(dest: Path | None = None) -> pd.DataFrame:
     """The 100 engines that ran to failure. Used to calibrate health scoring."""
     dest = Path(dest) if dest is not None else data_dir()
-    return _load_cached(str(dest / "train_FD001.txt"))
+    return read_cmapss_cached(str(dest / "train_FD001.txt"))
 
 
 def load_fleet(dest: Path | None = None) -> pd.DataFrame:
     """The 100 engines currently in service. What the agent is asked about."""
     dest = Path(dest) if dest is not None else data_dir()
-    return _load_cached(str(dest / "test_FD001.txt"))
+    return read_cmapss_cached(str(dest / "test_FD001.txt"))

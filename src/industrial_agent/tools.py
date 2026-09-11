@@ -21,6 +21,7 @@ import pandas as pd
 from .health import Baseline, deviations, recent_means, verdict, wear_index
 
 MAX_RANK = 25
+WORST_SENSORS = 4
 
 
 class FleetTools:
@@ -35,80 +36,95 @@ class FleetTools:
         self.baseline = baseline
 
     # -- helpers ----------------------------------------------------------
-    def _history(self, unit: int) -> pd.DataFrame:
+    def history(self, unit: int) -> pd.DataFrame:
+        """Every cycle recorded for one engine. Empty if the unit is unknown."""
         return self.fleet[self.fleet.unit == unit]
 
-    def _unknown(self, unit: int) -> str:
-        units = sorted(int(u) for u in self.fleet.unit.unique())
+    def unknown_unit_message(self, unit: int) -> str:
+        """Message for a unit that isn't in the fleet, naming the valid range."""
+        units = sorted(int(unit_id) for unit_id in self.fleet.unit.unique())
         return (f"No unit {unit} in the fleet. "
                 f"Valid units are {units[0]}-{units[-1]}.")
 
     # -- tools ------------------------------------------------------------
     def rank_fleet(self, top_n: int = 10, worst_first: bool = True) -> str:
-        """Rank every in-service engine by wear, to decide where to look."""
+        """Rank every in-service engine by wear, to decide where to look.
+
+        Returns a ranked summary as text, capped at MAX_RANK entries.
+        """
         top_n = max(1, min(int(top_n), MAX_RANK))
 
+        # Score every engine in the fleet, keeping its ID and service life.
         scored = []
         for unit in self.fleet.unit.unique():
-            history = self._history(unit)
+            history = self.history(unit)
             scored.append((wear_index(history, self.baseline), int(unit),
                            int(history.cycle.max())))
 
         scored.sort(reverse=worst_first)
-        urgent = sum(1 for pct, _, _ in scored if pct >= 70)
+        urgent_count = sum(1 for wear_pct, _, _ in scored if wear_pct >= 70)
 
-        end = "most worn" if worst_first else "healthiest"
+        end_of_range = "most worn" if worst_first else "healthiest"
         lines = [f"{len(scored)} engines in service. "
-                 f"{urgent} at 70+ wear index (act now).",
-                 f"\nThe {top_n} {end}:"]
-        for pct, unit, cycles in scored[:top_n]:
-            lines.append(f"  unit {unit:>3}: wear {pct:>3.0f}/100, "
+                 f"{urgent_count} at 70+ wear index (act now).",
+                 f"\nThe {top_n} {end_of_range}:"]
+
+        # One line per engine, from the requested end of the ranking.
+        for wear_pct, unit, cycles in scored[:top_n]:
+            lines.append(f"  unit {unit:>3}: wear {wear_pct:>3.0f}/100, "
                          f"{cycles} cycles in service")
         return "\n".join(lines)
 
     def get_current_readings(self, unit: int) -> str:
         """Latest sensor values for one in-service engine, with deviation from
         the healthy norm."""
-        history = self._history(unit)
+        history = self.history(unit)
         if history.empty:
-            return self._unknown(unit)
+            return self.unknown_unit_message(unit)
 
         recent = recent_means(history, self.baseline)
-        z = deviations(history, self.baseline)
+        z_scores = deviations(history, self.baseline)
 
         lines = [
             f"Unit {unit}, {int(history.cycle.max())} cycles in service.",
             f"Mean of last {self.baseline.window} cycles, with deviation from "
             f"healthy norm:",
         ]
+
+        # One line per sensor: current mean, healthy mean, and the gap in sd.
         for sensor in self.baseline.sensors:
             lines.append(f"  {sensor}: {recent[sensor]:.2f}  "
-                         f"(healthy {self.baseline.mu[sensor]:.2f}, "
-                         f"z={z[sensor]:+.1f})")
+                         f"(healthy {self.baseline.healthy_mean[sensor]:.2f}, "
+                         f"z={z_scores[sensor]:+.1f})")
         return "\n".join(lines)
 
     def assess_health(self, unit: int) -> str:
         """Overall wear of one in-service engine, calibrated against 100
         engines that ran to failure."""
-        history = self._history(unit)
+        history = self.history(unit)
         if history.empty:
-            return self._unknown(unit)
+            return self.unknown_unit_message(unit)
 
-        pct = wear_index(history, self.baseline)
+        wear_pct = wear_index(history, self.baseline)
         recent = recent_means(history, self.baseline)
-        z = deviations(history, self.baseline)
-        worst = z.abs().nlargest(4).index
+        z_scores = deviations(history, self.baseline)
+
+        # Only the sensors furthest from healthy are worth reporting.
+        worst_sensors = z_scores.abs().nlargest(WORST_SENSORS).index
 
         lines = [
-            f"Unit {unit}: {verdict(pct)}.",
-            f"Wear index {pct:.0f}/100.",
+            f"Unit {unit}: {verdict(wear_pct)}.",
+            f"Wear index {wear_pct:.0f}/100.",
             f"In service {int(history.cycle.max())} cycles.",
             "",
             "Largest deviations from healthy:",
         ]
-        for sensor in worst:
-            lines.append(f"  {sensor}: {recent[sensor]:.2f} vs healthy "
-                         f"{self.baseline.mu[sensor]:.2f} (z={z[sensor]:+.1f})")
+        for sensor in worst_sensors:
+            lines.append(
+                f"  {sensor}: {recent[sensor]:.2f} vs healthy "
+                f"{self.baseline.healthy_mean[sensor]:.2f} "
+                f"(z={z_scores[sensor]:+.1f})"
+            )
         return "\n".join(lines)
 
     @property

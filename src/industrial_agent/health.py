@@ -28,10 +28,18 @@ WINDOW = 10
 
 @dataclass(frozen=True)
 class Baseline:
-    """Healthy norm and failure calibration, derived from failed engines."""
+    """Healthy norm and failure calibration, derived from failed engines.
 
-    mu: pd.Series
-    sd: pd.Series
+    Fields:
+        healthy_mean: mean value per sensor across healthy early cycles.
+        healthy_sd: standard deviation per sensor over the same cycles.
+        failure_score: raw score comparable engines reached at failure.
+        sensors: sensor columns the baseline covers.
+        window: how many recent cycles a score averages over.
+    """
+
+    healthy_mean: pd.Series
+    healthy_sd: pd.Series
     failure_score: float
     sensors: list[str]
     window: int = WINDOW
@@ -48,41 +56,73 @@ def build_baseline(
     Pooling the early cycles of every engine beats a per-unit baseline here:
     it gives a stable noise estimate, and it works for in-service units with
     short histories.
+
+    Args:
+        failed: pd.DataFrame - run-to-failure histories, one row per cycle.
+        sensors: list[str] | None - sensor columns to score, defaults to
+            LIVE_SENSORS.
+        healthy_cycles: int - how many opening cycles count as healthy.
+        window: int - how many recent cycles a score averages over.
+
+    Returns:
+        Baseline - the healthy norm plus the failure-point calibration.
     """
     sensors = list(sensors) if sensors is not None else list(LIVE_SENSORS)
 
+    # The healthy norm: pool the opening cycles of every engine.
     early = failed[failed.cycle <= healthy_cycles]
-    mu = early[sensors].mean()
-    sd = early[sensors].std()
+    healthy_mean = early[sensors].mean()
+    healthy_sd = early[sensors].std()
 
-    # What the statistic reads at the moment of failure, averaged over every
-    # engine that got there. This is the scale, not a threshold - it is never
-    # surfaced to the user.
-    at_failure = [
-        _raw_score(failed[failed.unit == u], mu, sd, sensors, window)
-        for u in failed.unit.unique()
+    # Score every engine over its final cycles, i.e. at the point it failed.
+    # This is the scale, not a threshold - it is never surfaced to the user.
+    scores_at_failure = [
+        score_against_norm(
+            failed[failed.unit == unit], healthy_mean, healthy_sd, sensors, window
+        )
+        for unit in failed.unit.unique()
     ]
-    failure_score = float(pd.Series(at_failure).mean())
+    failure_score = float(pd.Series(scores_at_failure).mean())
 
-    return Baseline(mu=mu, sd=sd, failure_score=failure_score,
-                    sensors=sensors, window=window)
+    return Baseline(
+        healthy_mean=healthy_mean,
+        healthy_sd=healthy_sd,
+        failure_score=failure_score,
+        sensors=sensors,
+        window=window,
+    )
 
 
-def _raw_score(
+def score_against_norm(
     history: pd.DataFrame,
-    mu: pd.Series,
-    sd: pd.Series,
+    healthy_mean: pd.Series,
+    healthy_sd: pd.Series,
     sensors: list[str],
     window: int,
 ) -> float:
+    """Mean absolute z-score of an engine's recent cycles against a healthy norm.
+
+    Takes the norm as loose arguments rather than a `Baseline` so
+    `build_baseline` can call it while the baseline is still being assembled.
+
+    Args:
+        history: pd.DataFrame - one engine's rows, oldest cycle first.
+        healthy_mean: pd.Series - mean per sensor when healthy.
+        healthy_sd: pd.Series - standard deviation per sensor when healthy.
+        sensors: list[str] - sensor columns to score.
+        window: int - how many trailing cycles to average.
+
+    Returns:
+        float - deviation from healthy, in standard deviations.
+    """
     recent = history.tail(window)[sensors].mean()
-    return float(((recent - mu) / sd).abs().mean())
+    return float(((recent - healthy_mean) / healthy_sd).abs().mean())
 
 
 def deviations(history: pd.DataFrame, baseline: Baseline) -> pd.Series:
     """Per-sensor z-score of the recent window against the healthy norm."""
     recent = recent_means(history, baseline)
-    return (recent - baseline.mu) / baseline.sd
+    return (recent - baseline.healthy_mean) / baseline.healthy_sd
 
 
 def recent_means(history: pd.DataFrame, baseline: Baseline) -> pd.Series:
@@ -92,8 +132,13 @@ def recent_means(history: pd.DataFrame, baseline: Baseline) -> pd.Series:
 
 def raw_score(history: pd.DataFrame, baseline: Baseline) -> float:
     """Mean absolute deviation from the healthy norm, in standard deviations."""
-    return _raw_score(history, baseline.mu, baseline.sd,
-                      baseline.sensors, baseline.window)
+    return score_against_norm(
+        history,
+        baseline.healthy_mean,
+        baseline.healthy_sd,
+        baseline.sensors,
+        baseline.window,
+    )
 
 
 def wear_index(history: pd.DataFrame, baseline: Baseline) -> float:
@@ -107,12 +152,12 @@ def wear_index(history: pd.DataFrame, baseline: Baseline) -> float:
     return min(100.0, raw_score(history, baseline) / baseline.failure_score * 100)
 
 
-def verdict(pct: float) -> str:
+def verdict(wear_pct: float) -> str:
     """Plain-language reading of a wear index."""
-    if pct < 25:
+    if wear_pct < 25:
         return "healthy"
-    if pct < 50:
+    if wear_pct < 50:
         return "early wear"
-    if pct < 70:
+    if wear_pct < 70:
         return "significant wear, schedule inspection"
     return "close to failure, act now"
