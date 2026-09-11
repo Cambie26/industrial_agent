@@ -1,18 +1,16 @@
 # industrial_agent
 
-Demo project to show agentic AI capability. 
+Demo project to show agentic AI capability - LLM SDKs and tooling use. 
 
-An agent that answers maintenance questions about a fleet of 100 turbofan
+Implemented is an agent that answers maintenance questions about a fleet of 100 turbofan
 engines. One can ask it "which engines need attention?" and it decides which tools to
 call, calls them, and comes back with a judgement.
 
-No retrieval, no fine-tuning, no framework — a hand-written tool-use loop over
-the [Claude Messages API](https://docs.anthropic.com/en/api/messages) and the
-NASA C-MAPSS turbofan degradation dataset (subset FD001).
+The engine data used was taken from the NASA C-MAPSS turbofan degradation dataset (subset FD001). 
+The agent deployed uses anthropic model to interpret requests, initiate actions, and serve results.
 
-**[Read the demo notebook](notebooks/demo.ipynb)** — it is saved with its
-output, so you are looking at a completed run rather than something you need
-to execute. Each cell is one question, showing every tool call the model made
+**[Read the demo notebook](notebooks/demo.ipynb)** — which is saved with its
+cell outputs. Each cell is one question, showing every tool call the model made
 before it answered. [`demo_transcript.md`](demo_transcript.md) is the same
 conversation as plain markdown.
 
@@ -48,14 +46,14 @@ Three tools, one per question an engineer actually asks:
 
 ## Design notes
 
-**Tools return interpreted results, not raw rows.** A model reasons better over
-`sensor_11 is 3.2 sd above healthy` than over twenty floats, and the context
-stays small. The numeric work happens in Python; the model does the judgement.
+**Tools return interpreted results, not raw rows.** As a model reasons better over
+`sensor_11 is 3.2 sd above healthy` than over twenty floats. 
+The numeric work happens in Python; the model does the judgement.
 
 **The wear index is calibrated, not invented.** Scoring is the mean absolute
 z-score of an engine's last 10 cycles against a healthy norm — pooled from the
 first 20 cycles of all 100 run-to-failure engines, which gives a stable noise
-estimate and works for units with short histories. That raw statistic is then
+estimate. That raw statistic is then
 divided by the score those engines reached *at failure* (3.77 sd, computed in
 `build_baseline`), so **100 means "as worn as engines that failed"**. The
 calibration constant is never surfaced: an engineer sees `wear index 86`.
@@ -90,32 +88,12 @@ notebooks/
 tests/                    fixtures sliced from FD001; no network, no API key
 ```
 
-The demo prints plain text rather than rendering an `ipywidgets` chat box
-deliberately: widget state is not saved into a `.ipynb`, so a widget-based demo
-shows a visitor browsing GitHub nothing at all.
-
 ## Running it
 
-The notebook is a record, not a service — reading it needs nothing at all.
-To run it yourself you need your own Anthropic API key, and the calls are
-billed to you.
+To run the demo notebook yourself you will need your own Anthropic API key - add an `ANTHROPIC_API_KEY` secret.
 
-In Colab: open `notebooks/demo.ipynb`, add an `ANTHROPIC_API_KEY` secret, and
-run all. Locally:
-
-```bash
-pip install -e ".[dev]"
-export ANTHROPIC_API_KEY=sk-ant-...
-python -c "
-from industrial_agent import default_chat
-chat = default_chat()
-chat.ask('Which engines need attention?')
-"
-pytest && ruff check .
-```
-
-The dataset (~4 MB) downloads on first use into a gitignored `data/`.
-Default model is `claude-opus-5`; override with `default_chat(model=...)`.
+Note: the dataset (~4 MB) downloads on first use into a gitignored `data/`.
+Default model is `claude-opus-5`.
 
 ## Data
 
