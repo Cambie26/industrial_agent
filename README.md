@@ -1,7 +1,9 @@
 # industrial_agent
 
+Demo project to show agentic AI capability. 
+
 An agent that answers maintenance questions about a fleet of 100 turbofan
-engines. Ask it "which engines need attention?" and it decides which tools to
+engines. One can ask it "which engines need attention?" and it decides which tools to
 call, calls them, and comes back with a judgement.
 
 No retrieval, no fine-tuning, no framework — a hand-written tool-use loop over
