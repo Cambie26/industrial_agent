@@ -1,7 +1,5 @@
 # industrial_agent
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Cambie26/industrial_agent/blob/main/notebooks/demo.ipynb)
-
 An agent that answers maintenance questions about a fleet of 100 turbofan
 engines. Ask it "which engines need attention?" and it decides which tools to
 call, calls them, and comes back with a judgement.
@@ -10,10 +8,11 @@ No retrieval, no fine-tuning, no framework — a hand-written tool-use loop over
 the [Claude Messages API](https://docs.anthropic.com/en/api/messages) and the
 NASA C-MAPSS turbofan degradation dataset (subset FD001).
 
-**[Open the demo notebook](notebooks/demo.ipynb)** to see it working — each
-cell is one question, with every tool call the model made before answering.
-Running it also writes `demo_transcript.md`, the same conversation as plain
-markdown.
+**[Read the demo notebook](notebooks/demo.ipynb)** — it is saved with its
+output, so you are looking at a completed run rather than something you need
+to execute. Each cell is one question, showing every tool call the model made
+before it answered. [`demo_transcript.md`](demo_transcript.md) is the same
+conversation as plain markdown.
 
 ```
 ------------------------------------------------------------------------
@@ -95,9 +94,12 @@ shows a visitor browsing GitHub nothing at all.
 
 ## Running it
 
-In Colab, click the badge above, add an `ANTHROPIC_API_KEY` secret, and run all.
+The notebook is a record, not a service — reading it needs nothing at all.
+To run it yourself you need your own Anthropic API key, and the calls are
+billed to you.
 
-Locally:
+In Colab: open `notebooks/demo.ipynb`, add an `ANTHROPIC_API_KEY` secret, and
+run all. Locally:
 
 ```bash
 pip install -e ".[dev]"
