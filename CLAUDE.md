@@ -21,7 +21,8 @@
 - Same goes for docs and config: one `README.md`, one `pyproject.toml`.
   Don't scatter notes across extra markdown files.
 - Every notebook opens with the clone + editable install cell.
-  README starts with an "Open in Colab" badge.
+- The repo is a read-only showcase: no "Open in Colab" badges. Notebooks are
+  committed with their output so they can be read without being run.
 - `data/` is gitignored. Never commit datasets. Test fixtures go in
   `tests/fixtures/` and stay under a few hundred rows.
 
