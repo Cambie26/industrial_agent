@@ -2,7 +2,8 @@
 PDF -> blocks: the first stage of the maintenance-docs pipeline.
 
 Each handbook chapter is its own PDF in `data/raw/`, named with its chapter
-number (`ch10.pdf`, `chapter_10.pdf`, `10_turbine_engines.pdf` all work). A page
+number (`ch10.pdf`, `chapter_10.pdf`, the FAA's own `12_amtp_ch10_0.pdf`
+and `10_turbine_engines.pdf` all work). A page
 comes back as a list of `Block`s in reading order, each tagged as body text, a
 table (rendered as markdown) or a figure caption. Figures themselves are
 dropped - only their captions are kept.
@@ -29,7 +30,9 @@ RAW_DIR = Path("data/raw")
 # "Figure 10-12. Compressor stall ..." - the handbook numbers figures per chapter.
 CAPTION_PATTERN = re.compile(r"^Figure\s+\d+-\d+")
 
-# The first number in a file name is taken as the chapter number.
+# "ch10" / "chapter_10" in a file name wins; otherwise the first number is the
+# chapter. The FAA's downloads are named like "12_amtp_ch10_0.pdf".
+LABELLED_CHAPTER_PATTERN = re.compile(r"ch(?:apter)?[_\- ]?(\d+)", re.IGNORECASE)
 CHAPTER_PATTERN = re.compile(r"(\d+)")
 
 # A block that reaches this far (in points) either side of the page's centre
@@ -39,6 +42,9 @@ GUTTER_HALF_WIDTH = 10
 # Blocks entirely inside the top/bottom margin are running headers and page
 # numbers ("10-3"), not content.
 MARGIN_RATIO = 0.05
+
+# The handbook's page footers ("10-50") sit low but not always inside the margin.
+PAGE_NUMBER_PATTERN = re.compile(r"^\d+-\d+$")
 
 BlockKind = Literal["text", "table", "caption"]
 
@@ -56,7 +62,8 @@ class Block:
 
 def chapter_number(pdf_path: Path | str) -> int:
     """Chapter number taken from the file name. Raises if there isn't one."""
-    match = CHAPTER_PATTERN.search(Path(pdf_path).stem)
+    stem = Path(pdf_path).stem
+    match = LABELLED_CHAPTER_PATTERN.search(stem) or CHAPTER_PATTERN.search(stem)
     if match is None:
         raise ValueError(
             f"Can't tell which chapter {Path(pdf_path).name} is. Name chapter "
@@ -101,6 +108,22 @@ def table_to_markdown(rows: list[list[str | None]]) -> str:
         if row_index == 0:
             lines.append("|" + " --- |" * len(kept_columns))
     return "\n".join(lines)
+
+
+def table_cell_text(page: Any, table: Any) -> list[list[str | None]]:
+    """Text of every cell of a PyMuPDF table, row by row, header row first.
+
+    Reads each cell's box off the page rather than using `table.extract()`,
+    which drops the spaces between words in the handbook's fonts.
+    """
+    import pymupdf
+
+    rows = [row.cells for row in table.rows]
+    if table.header.external:
+        rows = [table.header.cells, *rows]
+    return [[page.get_textbox(pymupdf.Rect(cell)) if cell else None
+             for cell in row]
+            for row in rows]
 
 
 def reading_order(
@@ -164,10 +187,7 @@ def parse_page(page: Any, source: str, chapter: int, page_number: int) -> list[B
     # Pull out the tables first, as markdown, and remember where they sit.
     table_boxes = []
     for table in page.find_tables().tables:
-        rows = table.extract()
-        if table.header.external:
-            rows = [table.header.names, *rows]
-        markdown = table_to_markdown(rows)
+        markdown = table_to_markdown(table_cell_text(page, table))
         if not markdown:
             continue
         table_boxes.append(tuple(table.bbox))
@@ -184,7 +204,7 @@ def parse_page(page: Any, source: str, chapter: int, page_number: int) -> list[B
         if any(inside(box, table_box) for table_box in table_boxes):
             continue
         text = clean_text(raw_text)
-        if not text:
+        if not text or PAGE_NUMBER_PATTERN.match(text):
             continue
         kind: BlockKind = "caption" if CAPTION_PATTERN.match(text) else "text"
         placed.append((box, Block(source, chapter, page_number, kind, text)))

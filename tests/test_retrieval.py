@@ -46,6 +46,7 @@ def make_chapter_pdf(pdf_path: Path) -> Path:
                               row_edges[row_index] + 20), cell)
 
     page.insert_textbox((50, 400, 290, 440), "Figure 10-1. Axial-flow compressor.")
+    page.insert_textbox((280, 700, 340, 720), "10-1")
     document.save(pdf_path)
     document.close()
     return pdf_path
@@ -61,6 +62,11 @@ def chapter_blocks(tmp_path):
 def test_chapter_number_comes_from_the_file_name():
     assert chapter_number("ch10.pdf") == 10
     assert chapter_number("chapter_03_engine_ignition.pdf") == 3
+    assert chapter_number("10_turbine_engines.pdf") == 10
+
+
+def test_chapter_number_prefers_the_ch_label_in_faa_file_names():
+    assert chapter_number("12_amtp_ch10_0.pdf") == 10
 
 
 def test_chapter_number_fails_loudly_without_a_number():
@@ -100,6 +106,10 @@ def test_parse_returns_table_as_markdown(chapter_blocks):
 def test_parse_tags_figure_captions(chapter_blocks):
     captions = [block.text for block in chapter_blocks if block.kind == "caption"]
     assert captions == ["Figure 10-1. Axial-flow compressor."]
+
+
+def test_parse_drops_page_number_footers(chapter_blocks):
+    assert not any(block.text == "10-1" for block in chapter_blocks)
 
 
 def test_parse_tags_every_block_with_chapter_and_page(chapter_blocks):
