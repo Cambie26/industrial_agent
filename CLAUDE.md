@@ -54,6 +54,27 @@
 - Fail loudly with a clear message rather than silently returning an empty
   frame or a default.
 
+## RAG over the maintenance handbook (v2)
+- Goal: one question can draw on both the sensor tools and the FAA Powerplant
+  Handbook, e.g. "Engine 34 shows HPC degradation. What inspection applies,
+  and how urgent is it?"
+- Pipeline lives in `src/industrial_agent/retrieval/`: `parse.py` (PDF →
+  blocks) → `chunk.py` → `index.py` (BGE + BM25) → `search.py` (hybrid fusion,
+  cross-encoder rerank, turbine filter). `retrieval.search()` is the entry
+  point; the agent reaches it through a `search_maintenance_docs` tool in
+  `tools.py`. Raw-SDK tool loop only — no LangChain or LlamaIndex.
+- Corpus: one PDF per chapter in `data/raw/`, named with its chapter number
+  (`ch10.pdf`). Index goes to `data/index/`. Both gitignored.
+- Heavy dependencies are in the `[rag]` extra and imported inside functions:
+  `import industrial_agent` must keep working without them.
+- Chunks carry chapter, section, page and engine_type. Answers drawn from the
+  handbook cite chapter and page; weak retrieval means a refusal, not a guess.
+- `scripts/` and `eval/` are the two sanctioned extra top-level folders: thin
+  Python entry points with `argparse`, run from Colab as
+  `!cd repo && python scripts/...`. Logic still belongs in the package.
+- `eval/queries.jsonl` is hand-labelled and committed (it's exempt from the
+  `*.jsonl` ignore). Don't generate questions into it.
+
 ## Constraints
 <!-- fill in once the structure exists — the untestable boundaries,
      the config approach, anything you had to decide rather than default to -->

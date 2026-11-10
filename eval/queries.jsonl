@@ -1,0 +1,3 @@
+{"id": "example-01", "question": "PLACEHOLDER - What causes a compressor stall in a turbine engine?", "source_chapter": 10, "source_section": "PLACEHOLDER", "source_page": null, "needs_data": false, "answerable": true}
+{"id": "example-02", "question": "PLACEHOLDER - Engine 34 shows HPC degradation. What inspection applies, and how urgent is it?", "source_chapter": 10, "source_section": "PLACEHOLDER", "source_page": null, "needs_data": true, "answerable": true}
+{"id": "example-03", "question": "PLACEHOLDER - What is the torque value for the fan blade retaining bolts on a CFM56?", "source_chapter": null, "source_section": null, "source_page": null, "needs_data": false, "answerable": false}

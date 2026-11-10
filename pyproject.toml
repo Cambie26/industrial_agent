@@ -16,6 +16,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+# Maintenance-docs RAG: PDF parsing, embeddings, BM25, reranker.
+rag = [
+    "pymupdf>=1.24",
+    "sentence-transformers>=3.0",
+    "rank-bm25>=0.2.2",
+    "numpy>=1.26",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

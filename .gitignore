@@ -231,6 +231,8 @@ data/
 *.parquet
 *.jsonl
 !tests/fixtures/*.csv
+!tests/fixtures/*.pdf
+!eval/queries.jsonl
 
 # Model artefacts
 checkpoints/

@@ -3,3 +3,5 @@
 anthropic>=0.40
 pandas>=2.0
 matplotlib>=3.7
+# RAG over the maintenance handbook needs the [rag] extra in pyproject.toml:
+#   pip install -e ".[rag]"
