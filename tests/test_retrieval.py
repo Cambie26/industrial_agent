@@ -3,6 +3,7 @@ swap in tests/fixtures/ch10_sample.pdf once it exists. Chunk tests build
 blocks by hand, and index tests use a fake embedder, so no model download.
 """
 
+import importlib
 from pathlib import Path
 
 import pytest
@@ -350,3 +351,113 @@ def test_labelled_queries_file_loads_with_the_expected_fields():
                        "source_page", "needs_data", "answerable"}
     for query in load_queries():
         assert set(query) == expected_fields
+
+
+def make_chunk(position: int, text: str, engine_type: str) -> chunk.Chunk:
+    """A chapter 10 chunk for search tests, one per page."""
+    return chunk.Chunk(chunk_id=f"ch10-p{position:03d}-{position:03d}", text=text,
+                       source="ch10.pdf", chapter=10, section="Section",
+                       subsection="", page=position, page_end=position,
+                       kind="text", engine_type=engine_type)
+
+
+@pytest.fixture()
+def search_index(monkeypatch):
+    """A four-chunk index with hand-set embeddings, and fake models that need
+    no download. The query always embeds to the first axis."""
+    numpy = pytest.importorskip("numpy")
+    pytest.importorskip("rank_bm25")
+    from industrial_agent.retrieval.index import Index, build_bm25
+
+    # The package exports the search() function under the module's own name,
+    # so fetch the module itself to patch it.
+    search_module = importlib.import_module("industrial_agent.retrieval.search")
+
+    chunks = [
+        make_chunk(0, "Piston ring gap check", "reciprocating"),
+        make_chunk(1, "Compressor wash procedure", "turbine"),
+        make_chunk(2, "High EGT troubleshooting", "turbine"),
+        make_chunk(3, "Logbook entries after maintenance", "general"),
+    ]
+    embeddings = numpy.array([[1.0, 0.0, 0.0], [0.9, 0.1, 0.0],
+                              [0.0, 1.0, 0.0], [0.1, 0.0, 0.99]], dtype=numpy.float32)
+    embeddings /= numpy.linalg.norm(embeddings, axis=1, keepdims=True)
+
+    query_vector = numpy.array([1.0, 0.0, 0.0], dtype=numpy.float32)
+    monkeypatch.setattr(search_module, "query_embedder",
+                        lambda model_name: lambda query: query_vector)
+    # The fake reranker loves anything mentioning EGT.
+    monkeypatch.setattr(search_module, "cross_encoder",
+                        lambda model_name: lambda query, passages: [
+                            5.0 if "EGT" in passage else -5.0 for passage in passages])
+    return Index(chunks, embeddings, build_bm25(chunks), "fake-model")
+
+
+def hit_pages(hits) -> list[int]:
+    """The page of each hit, best first."""
+    return [hit.chunk.page for hit in hits]
+
+
+def test_reciprocal_rank_fusion_rewards_agreement_between_rankings():
+    from industrial_agent.retrieval.search import reciprocal_rank_fusion
+
+    fused = reciprocal_rank_fusion([[0, 1], [1, 2]], k=60)
+    assert max(fused, key=fused.get) == 1
+    assert fused[1] == pytest.approx(1 / 62 + 1 / 61)
+    assert fused[0] == pytest.approx(1 / 61)
+
+
+def test_turbine_filter_drops_reciprocating_chunks_only(search_index):
+    from industrial_agent.retrieval.search import search
+
+    pages = hit_pages(search("gap", top_k=4, hybrid=False, rerank=False,
+                             index=search_index))
+    assert 0 not in pages
+    assert set(pages) == {1, 2, 3}
+    unfiltered = search("gap", top_k=4, hybrid=False, rerank=False,
+                        turbine_only=False, index=search_index)
+    assert hit_pages(unfiltered)[0] == 0
+
+
+def test_dense_only_ranks_by_cosine_similarity(search_index):
+    from industrial_agent.retrieval.search import search
+
+    hits = search("EGT", top_k=2, hybrid=False, rerank=False, index=search_index)
+    assert hit_pages(hits) == [1, 3]
+    assert {hit.scored_by for hit in hits} == {"dense"}
+
+
+def test_hybrid_lets_bm25_rescue_an_exact_term_the_embeddings_miss(search_index):
+    from industrial_agent.retrieval.search import search
+
+    hits = search("EGT", top_k=2, rerank=False, index=search_index)
+    assert hit_pages(hits) == [1, 2]
+    assert {hit.scored_by for hit in hits} == {"rrf"}
+
+
+def test_reranker_reorders_candidates_and_scores_between_zero_and_one(search_index):
+    from industrial_agent.retrieval.search import search
+
+    hits = search("EGT", top_k=3, index=search_index)
+    assert hit_pages(hits)[0] == 2
+    assert all(hit.scored_by == "rerank" and 0 < hit.score < 1 for hit in hits)
+    assert hits[0].score > 0.99 > 0.01 > hits[-1].score
+
+
+def test_search_rejects_bad_arguments(search_index):
+    from industrial_agent.retrieval.search import search
+
+    with pytest.raises(ValueError, match="Empty query"):
+        search("   ", index=search_index)
+    with pytest.raises(ValueError, match="top_k"):
+        search("EGT", top_k=0, index=search_index)
+
+
+def test_search_fails_loudly_when_the_filter_leaves_nothing(search_index):
+    from industrial_agent.retrieval.index import Index
+    from industrial_agent.retrieval.search import search
+
+    only_reciprocating = Index(search_index.chunks[:1], search_index.embeddings[:1],
+                               search_index.bm25, "fake-model")
+    with pytest.raises(ValueError, match="engine-type filter"):
+        search("piston", index=only_reciprocating)
