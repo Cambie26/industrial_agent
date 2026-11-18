@@ -44,7 +44,14 @@ CANDIDATES_PER_RETRIEVER = 50
 # Fused candidates passed to the cross-encoder; it is the slow step.
 RERANK_CANDIDATES = 20
 
+# Confidence bands on the best reranker score, set from Chapter 10 tests:
+# off-topic questions scored 0.00, a passage that only mentions the topic
+# 0.26, and real answers 0.58-0.74.
+REFUSE_BELOW = 0.15
+CAUTIOUS_BELOW = 0.40
+
 ScoredBy = Literal["rerank", "rrf", "dense"]
+Band = Literal["refuse", "cautious", "confident", "unscored"]
 
 
 @dataclass
@@ -137,6 +144,34 @@ def relevances(raw_scores: list[float]) -> list[float]:
     if all(0.0 <= raw_score <= 1.0 for raw_score in raw_scores):
         return list(raw_scores)
     return [sigmoid(raw_score) for raw_score in raw_scores]
+
+
+def confidence_band(
+    hit: SearchHit,
+    refuse_below: float = REFUSE_BELOW,
+    cautious_below: float = CAUTIOUS_BELOW,
+) -> Band:
+    """How far to trust a hit: refuse, answer cautiously, or answer.
+
+    Only reranker scores are on a fixed 0-1 scale, so hits scored by RRF or
+    cosine similarity come back "unscored".
+
+    Args:
+        hit: one search hit.
+        refuse_below: scores under this mean the handbook doesn't cover it.
+        cautious_below: scores under this (and above refuse_below) mean the
+            passage only touches on the question.
+
+    Returns:
+        "refuse", "cautious", "confident" or "unscored".
+    """
+    if hit.scored_by != "rerank":
+        return "unscored"
+    if hit.score < refuse_below:
+        return "refuse"
+    if hit.score < cautious_below:
+        return "cautious"
+    return "confident"
 
 
 def search(

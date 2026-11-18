@@ -474,3 +474,103 @@ def test_search_fails_loudly_when_the_filter_leaves_nothing(search_index):
                                search_index.bm25, "fake-model")
     with pytest.raises(ValueError, match="engine-type filter"):
         search("piston", index=only_reciprocating)
+
+
+def scored_hit(score: float, scored_by: str = "rerank", page: int = 60):
+    """A search hit on a turbine troubleshooting chunk."""
+    from industrial_agent.retrieval.search import SearchHit
+
+    hit_chunk = make_chunk(page, "Section\n\nHigh EGT at takeoff.", "turbine")
+    hit_chunk.subsection = "Turbine Engine Analyzer Uses"
+    return SearchHit(hit_chunk, score, scored_by)
+
+
+def test_confidence_band_follows_the_thresholds():
+    from industrial_agent.retrieval.search import confidence_band
+
+    assert confidence_band(scored_hit(0.739)) == "confident"
+    assert confidence_band(scored_hit(0.260)) == "cautious"
+    assert confidence_band(scored_hit(0.000)) == "refuse"
+    assert confidence_band(scored_hit(0.260), cautious_below=0.2) == "confident"
+
+
+def test_confidence_band_is_unscored_without_the_reranker():
+    from industrial_agent.retrieval.search import confidence_band
+
+    assert confidence_band(scored_hit(0.03, scored_by="rrf")) == "unscored"
+
+
+def test_app_table_and_verdict_describe_the_hits():
+    from industrial_agent.retrieval.app import hits_table, verdict
+
+    hits = [scored_hit(0.579), scored_hit(0.02, page=55)]
+    rows = hits_table(hits, refuse_below=0.15, cautious_below=0.4)
+    assert rows[0] == [1, 0.579, "confident", "Ch. 10, p. 10-60", "turbine", "text",
+                       "Section > Turbine Engine Analyzer Uses"]
+    assert rows[1][2] == "refuse"
+    assert verdict(hits, 0.15, 0.4).startswith("**Answer**")
+    assert verdict(hits, 0.15, 0.6).startswith("**Answer cautiously**")
+
+
+def test_app_hit_text_drops_the_heading_line():
+    from industrial_agent.retrieval.app import hits_markdown
+
+    text = hits_markdown([scored_hit(0.579)])
+    assert text.startswith("### 1. Ch. 10, p. 10-60 - 0.579")
+    assert "High EGT at takeoff." in text
+    assert "Section\n\nHigh" not in text
+
+
+def test_labelled_query_records_the_chosen_hit_as_the_source():
+    from industrial_agent.retrieval.app import labelled_query, source_choices
+
+    hits = [scored_hit(0.739, page=54), scored_hit(0.579, page=60)]
+    record = labelled_query("High EGT at takeoff?", source_choices(hits)[1], hits,
+                            needs_data=False, query_id="q01")
+    assert record == {"id": "q01", "question": "High EGT at takeoff?",
+                      "source_chapter": 10, "source_section": "Section",
+                      "source_page": 60, "needs_data": False, "answerable": True}
+
+
+def test_labelled_query_marks_not_covered_questions_unanswerable():
+    from industrial_agent.retrieval.app import NOT_COVERED, labelled_query
+
+    record = labelled_query("CFM56 fan bolt torque?", NOT_COVERED,
+                            [scored_hit(0.0)], needs_data=False, query_id="q02")
+    assert record["answerable"] is False
+    assert record["source_section"] is None
+
+
+def test_labelled_query_refuses_without_a_question_or_a_choice():
+    from industrial_agent.retrieval.app import labelled_query
+
+    with pytest.raises(ValueError, match="question"):
+        labelled_query("  ", "anything", [], needs_data=False, query_id="q01")
+    with pytest.raises(ValueError, match="Pick"):
+        labelled_query("Why?", None, [scored_hit(0.5)], needs_data=False,
+                       query_id="q01")
+
+
+def test_saved_labels_number_on_and_load_as_eval_queries(tmp_path):
+    from industrial_agent.retrieval.app import (
+        NOT_COVERED,
+        append_query,
+        labelled_query,
+        next_query_id,
+    )
+
+    queries_path = tmp_path / "drive" / "queries.jsonl"
+    assert next_query_id(queries_path) == "q01"
+    for question in ("First?", "Second?"):
+        append_query(queries_path, labelled_query(
+            question, NOT_COVERED, [], needs_data=True,
+            query_id=next_query_id(queries_path)))
+    assert next_query_id(queries_path) == "q03"
+    assert [query["id"] for query in load_queries(queries_path)] == ["q01", "q02"]
+
+
+def test_app_builds_without_launching(search_index):
+    pytest.importorskip("gradio")
+    from industrial_agent.retrieval.app import build_app
+
+    assert build_app(search_index) is not None
