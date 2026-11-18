@@ -13,8 +13,8 @@ The pipeline, each stage switchable so `eval/run_eval.py` can ablate it:
 
 Before touching this, know that:
   - A hit's score means different things depending on the last stage that
-    ran: a 0-1 relevance from the reranker (sigmoid of its logit), an RRF
-    score, or a cosine similarity. Only the reranker score is meant to be
+    ran: a 0-1 relevance from the reranker, an RRF score, or a cosine
+    similarity. Only the reranker score is meant to be
     compared against a fixed "is this relevant enough" threshold; the agent's
     refusal rule (PR 5) relies on that. `SearchHit.scored_by` says which.
   - The models are loaded once per process and cached. Tests replace
@@ -78,14 +78,19 @@ def query_embedder(model_name: str) -> Callable[[str], Any]:
 
 @lru_cache(maxsize=2)
 def cross_encoder(model_name: str) -> Callable[[str, list[str]], list[float]]:
-    """A function that scores (query, passage) pairs with a cross-encoder,
-    returning raw logits. Loaded once per model and process."""
+    """A function that scores (query, passage) pairs with a cross-encoder.
+    Loaded once per model and process.
+
+    sentence-transformers already applies a sigmoid for single-label models
+    like bge-reranker, so this usually returns 0-1 relevances, not logits;
+    `relevances` copes with either.
+    """
     from sentence_transformers import CrossEncoder
 
     model = CrossEncoder(model_name)
 
     def score(query: str, passages: list[str]) -> list[float]:
-        return [float(logit) for logit in model.predict(
+        return [float(raw_score) for raw_score in model.predict(
             [(query, passage) for passage in passages])]
 
     return score
@@ -117,8 +122,21 @@ def reciprocal_rank_fusion(
 
 
 def sigmoid(logit: float) -> float:
-    """Logistic function, turning a reranker logit into a 0-1 relevance."""
+    """Logistic function, turning a logit into a 0-1 relevance."""
     return 1.0 / (1.0 + math.exp(-logit))
+
+
+def relevances(raw_scores: list[float]) -> list[float]:
+    """Reranker output as 0-1 relevances.
+
+    Scores already in 0-1 are taken as relevances and passed through;
+    applying a sigmoid to them again squashes everything into 0.5-0.73,
+    which is the bug this guards against. Anything outside 0-1 is treated
+    as raw logits and put through a sigmoid.
+    """
+    if all(0.0 <= raw_score <= 1.0 for raw_score in raw_scores):
+        return list(raw_scores)
+    return [sigmoid(raw_score) for raw_score in raw_scores]
 
 
 def search(
@@ -176,8 +194,8 @@ def search(
     # Rescore the best fused candidates with the cross-encoder.
     candidates = hits[:RERANK_CANDIDATES]
     passages = [hit.chunk.text for hit in candidates]
-    logits = cross_encoder(RERANKER_MODEL)(query, passages)
-    reranked = [SearchHit(hit.chunk, sigmoid(logit), "rerank")
-                for hit, logit in zip(candidates, logits, strict=True)]
+    scores = relevances(cross_encoder(RERANKER_MODEL)(query, passages))
+    reranked = [SearchHit(hit.chunk, score, "rerank")
+                for hit, score in zip(candidates, scores, strict=True)]
     reranked.sort(key=lambda hit: -hit.score)
     return reranked[:top_k]

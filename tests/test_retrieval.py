@@ -444,6 +444,19 @@ def test_reranker_reorders_candidates_and_scores_between_zero_and_one(search_ind
     assert hits[0].score > 0.99 > 0.01 > hits[-1].score
 
 
+def test_reranker_probabilities_pass_through_without_a_second_sigmoid():
+    from industrial_agent.retrieval.search import relevances
+
+    assert relevances([0.0, 0.58, 1.0]) == [0.0, 0.58, 1.0]
+
+
+def test_reranker_logits_are_turned_into_probabilities():
+    from industrial_agent.retrieval.search import relevances
+
+    assert relevances([0.0, 5.0, -5.0]) == pytest.approx([0.5, 0.9933, 0.0067],
+                                                         abs=1e-4)
+
+
 def test_search_rejects_bad_arguments(search_index):
     from industrial_agent.retrieval.search import search
 
